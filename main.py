@@ -552,7 +552,7 @@ class ScannerScreen(Screen):
             if enhanced_img is None:
                 return
                 
-            temp_dir = os.path.join(self.get_app_storage_path(), 'ocr_temp')
+            temp_dir = os.path.join(get_android_cache_dir(), 'ocr_temp')
             os.makedirs(temp_dir, exist_ok=True)
             temp_path = os.path.join(temp_dir, f'ocr_{int(time.time()*1000)}.png')
             enhanced_img.save(temp_path, dpi=(300, 300), quality=100)
