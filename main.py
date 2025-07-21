@@ -559,11 +559,10 @@ class ScannerScreen(Screen):
             
             asset_id = self.ocr_space(temp_path)
             
-            if self.save_to_gallery(img):
-                self.capture_count += 1
-                self.ids.status_label.text = f"扫描次数: {self.capture_count}"
+            #if self.save_to_gallery(img):
+                #self.capture_count += 1
+                #self.ids.status_label.text = f"扫描次数: {self.capture_count}"
             
-            # 5. 处理结果
             if asset_id:
                 print(f"识别结果: {asset_id}")
                 self.handle_scan_result(asset_id)
