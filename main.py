@@ -609,7 +609,7 @@ class ScannerScreen(Screen):
     def init_camera(self):
         try:
             if platform == 'android':
-                Clock.schedule_once(self._init_camera_android, 0)
+                Clock.schedule_once(self._init_camera_android, 0.5)
             else:
                 self._init_camera_desktop()
         except Exception as e:
@@ -630,7 +630,7 @@ class ScannerScreen(Screen):
                 self.show_message("错误", "该设备不支持相机功能")
                 return
         
-        Clock.schedule_once(lambda dt: self._add_camera_to_ui(), 0)
+        Clock.schedule_once(lambda dt: self._add_camera_to_ui(), 0.5)
 
     def _init_camera_desktop(self):
         try:
