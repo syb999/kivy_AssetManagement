@@ -75,6 +75,7 @@ class AssetDatabase:
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             asset_id TEXT NOT NULL UNIQUE,
             asset_name TEXT,
+            asset_type TEXT,
             user TEXT,
             location TEXT,
             notes TEXT,
@@ -87,11 +88,12 @@ class AssetDatabase:
     def add_asset(self, asset_data):
         cursor = self.conn.cursor()
         cursor.execute('''
-        INSERT INTO assets (asset_id, asset_name, user, location, notes)
-        VALUES (?, ?, ?, ?, ?)
+        INSERT INTO assets (asset_id, asset_name, asset_type, user, location, notes)
+        VALUES (?, ?, ?, ?, ?, ?)
         ''', (
             asset_data.get('asset_id', ''),
             asset_data.get('asset_name', ''),
+            asset_data.get('asset_type', ''),
             asset_data.get('user', ''),
             asset_data.get('location', ''),
             asset_data.get('notes', '')
@@ -157,16 +159,16 @@ class AssetDatabase:
             raise ValueError("没有数据可导出")
         
         df = pd.DataFrame(assets)
-        df = df[['id', 'asset_id', 'asset_name', 'user', 'location', 'notes']]
+        df = df[['id', 'asset_id', 'asset_name', 'asset_type', 'user', 'location', 'notes']]
         
         wb = Workbook()
         ws = wb.active
         ws.title = "资产数据"
         
-        headers = ['序号', '资产编号', '资产名称', '使用人', '存放地点', '备注']
+        headers = ['序号', '资产编号', '资产名称', '资产分类', '使用人', '存放地点', '备注']
         ws.append(headers)
         
-        for col in range(1, 7):
+        for col in range(1, 8):
             cell = ws.cell(row=1, column=col)
             cell.font = Font(bold=True)
             cell.alignment = Alignment(horizontal='center')
@@ -178,9 +180,10 @@ class AssetDatabase:
             'A': 6,   # 序号
             'B': 25,  # 资产编号
             'C': 25,  # 资产名称
-            'D': 15,  # 使用人
-            'E': 20,  # 存放地点
-            'F': 20   # 备注
+            'D': 25,  # 资产分类
+            'E': 15,  # 使用人
+            'F': 20,  # 存放地点
+            'G': 20   # 备注
         }
         
         for col_letter, width in column_widths.items():
@@ -195,7 +198,7 @@ class AssetDatabase:
         try:
             df = pd.read_excel(file_path, engine='openpyxl')
             
-            required_columns = ['资产编号', '资产名称', '使用人', '存放地点', '备注']
+            required_columns = ['资产编号', '资产名称', '资产分类', '使用人', '存放地点', '备注']
             for col in required_columns:
                 if col not in df.columns:
                     raise ValueError(f"Excel文件中缺少必要列: {col}")
@@ -207,6 +210,7 @@ class AssetDatabase:
                 asset_data = {
                     'asset_id': str(row['资产编号']).strip(),
                     'asset_name': str(row['资产名称']).strip(),
+                    'asset_type': str(row['资产分类']).strip(),
                     'user': str(row['使用人']).strip(),
                     'location': str(row['存放地点']).strip(),
                     'notes': str(row['备注']).strip()
@@ -782,6 +786,7 @@ class DataInputScreen(Screen):
         self.current_asset = asset_data
         self.ids.asset_id.text = asset_data.get('asset_id', '')
         self.ids.asset_name.text = asset_data.get('asset_name', '')
+        self.ids.asset_type.text = asset_data.get('asset_type', '')
         self.ids.user.text = asset_data.get('user', '')
         self.ids.location.text = asset_data.get('location', '')
         self.ids.notes.text = asset_data.get('notes', '')
@@ -794,6 +799,7 @@ class DataInputScreen(Screen):
             
         new_data = {
             'asset_name': self.ids.asset_name.text.strip(),
+            'asset_type': self.ids.asset_type.text.strip(),
             'user': self.ids.user.text.strip(),
             'location': self.ids.location.text.strip(),
             'notes': self.ids.notes.text.strip()
@@ -817,6 +823,7 @@ class DataInputScreen(Screen):
         asset_data = {
             'asset_id': self.ids.asset_id.text.strip(),
             'asset_name': self.ids.asset_name.text.strip(),
+            'asset_type': self.ids.asset_type.text.strip(),
             'user': self.ids.user.text.strip(),
             'location': self.ids.location.text.strip(),
             'notes': self.ids.notes.text.strip()
@@ -846,6 +853,7 @@ class DataInputScreen(Screen):
         self.current_asset = None
         self.ids.asset_id.text = ''
         self.ids.asset_name.text = ''
+        self.ids.asset_type.text = ''
         self.ids.user.text = ''
         self.ids.location.text = ''
         self.ids.notes.text = ''
@@ -898,6 +906,7 @@ class DataViewScreen(Screen):
             'id': 60,
             'asset_id': 200,
             'asset_name': 200,
+            'asset_type': 150,
             'user': 150,
             'location': 200,
             'notes': 150,
@@ -905,7 +914,7 @@ class DataViewScreen(Screen):
         }
         
         for asset in assets:
-            for col in ['id', 'asset_id', 'asset_name', 'user', 'location', 'notes']:
+            for col in ['id', 'asset_id', 'asset_name', 'asset_type', 'user', 'location']:
                 lbl = Label(
                     text=str(asset.get(col, '')),
                     size_hint_x=None,
@@ -1622,7 +1631,7 @@ KV = '''
                 cols: 2
                 spacing: 10
                 size_hint_y: None
-                height: 350
+                height: 410
                 row_default_height: 60
                 
                 Label:
@@ -1640,6 +1649,15 @@ KV = '''
                     font_name: 'simhei'
                 TextInput:
                     id: asset_name
+                    multiline: False
+                    font_name: 'simhei'
+
+                Label:
+                    text: '资产分类:'
+                    size_hint_x: 0.3
+                    font_name: 'simhei'
+                TextInput:
+                    id: asset_type
                     multiline: False
                     font_name: 'simhei'
                 
@@ -1724,16 +1742,16 @@ KV = '''
                 font_name: 'simhei'
             
             Button:
-                id: filter_asset_id
-                text: '资产编号'
-                font_name: 'simhei'
-                on_release: root.show_filter_dropdown('asset_id')
-            
-            Button:
                 id: filter_asset_name
                 text: '资产名称'
                 font_name: 'simhei'
                 on_release: root.show_filter_dropdown('asset_name')
+
+            Button:
+                id: filter_asset_type
+                text: '资产分类'
+                font_name: 'simhei'
+                on_release: root.show_filter_dropdown('asset_type')
             
             Button:
                 id: filter_user
@@ -1783,6 +1801,12 @@ KV = '''
                     bold: True
                     font_name: 'simhei'
                 Label:
+                    text: '资产分类'
+                    size_hint_x: None
+                    width: 200
+                    bold: True
+                    font_name: 'simhei'
+                Label:
                     text: '使用人'
                     size_hint_x: None
                     width: 150
@@ -1792,12 +1816,6 @@ KV = '''
                     text: '存放地点'
                     size_hint_x: None
                     width: 200
-                    bold: True
-                    font_name: 'simhei'
-                Label:
-                    text: '备注'
-                    size_hint_x: None
-                    width: 150
                     bold: True
                     font_name: 'simhei'
 

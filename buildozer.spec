@@ -17,7 +17,7 @@ source.include_dirs = assets, data
 
 exclude_modules = os,json
 
-version = 0.1
+version = 1.0
 
 requirements = python3,kivy,pyjnius,jnius,plyer,sdl2,sdl2_image,sdl2_ttf,sdl2_mixer,android,pillow,sqlite3,numpy,pandas,openpyxl,et_xmlfile,requests
 
