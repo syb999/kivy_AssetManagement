@@ -207,13 +207,18 @@ class AssetDatabase:
             updated_count = 0
             
             for _, row in df.iterrows():
+                def process_cell(value):
+                    if pd.isna(value):
+                        return ''
+                    return str(value).strip()
+
                 asset_data = {
-                    'asset_id': str(row['资产编号']).strip(),
-                    'asset_name': str(row['资产名称']).strip(),
-                    'asset_type': str(row['资产分类']).strip(),
-                    'user': str(row['使用人']).strip(),
-                    'location': str(row['存放地点']).strip(),
-                    'notes': str(row['备注']).strip()
+                    'asset_id': process_cell(row['资产编号']),
+                    'asset_name': process_cell(row['资产名称']),
+                    'asset_type': process_cell(row['资产分类']),
+                    'user': process_cell(row['使用人']),
+                    'location': process_cell(row['存放地点']),
+                    'notes': process_cell(row['备注'])
                 }
                 
                 if not asset_data['asset_id']:
