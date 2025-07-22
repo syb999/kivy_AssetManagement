@@ -251,6 +251,7 @@ class ScannerScreen(Screen):
             
         popup = Popup(
             title=title,
+            title_font='simhei',
             size_hint=(0.8, 0.4),
             title_color=(1, 0, 0, 1) if is_error else (0, 0.5, 0, 1),
             separator_color=(0.8, 0, 0, 1) if is_error else (0, 0.5, 0, 1)
@@ -860,7 +861,7 @@ class DataInputScreen(Screen):
         self.ids.save_btn.text = '保存'
     
     def show_popup(self, title, message):
-        popup = Popup(title=title, size_hint=(0.8, 0.4))
+        popup = Popup(title=title, title_font='simhei', size_hint=(0.8, 0.4))
         content = BoxLayout(orientation='vertical', padding=10)
         content.add_widget(Label(text=message, font_name='simhei'))
         close_btn = Button(text='关闭', size_hint=(1, 0.3), font_name='simhei')
@@ -870,7 +871,7 @@ class DataInputScreen(Screen):
         popup.open()
 
     def show_error(self, message):
-        popup = Popup(title='错误', size_hint=(0.8, 0.4))
+        popup = Popup(title='错误', title_font='simhei', size_hint=(0.8, 0.4))
         content = BoxLayout(orientation='vertical', padding=10)
         content.add_widget(Label(text=message, font_name='simhei'))
         close_btn = Button(text='关闭', size_hint=(1, 0.3), font_name='simhei')
@@ -1004,6 +1005,7 @@ class DataViewScreen(Screen):
         
         popup = Popup(
             title='确认删除',
+            title_font='simhei',
             content=content,
             size_hint=(0.6, 0.4)
         )
@@ -1200,6 +1202,7 @@ class DataViewScreen(Screen):
         chooser = FileChooserListView(
             path=os.path.expanduser('~'),
             filters=['*.xlsx', '*.xls'],
+            font_name='simhei',
             size_hint=(1, 0.9)
         )
         
@@ -1214,6 +1217,7 @@ class DataViewScreen(Screen):
         
         popup = Popup(
             title='选择Excel文件',
+            font_name='simhei',
             content=content,
             size_hint=(0.8, 0.8),
             auto_dismiss=False
@@ -1241,6 +1245,7 @@ class DataViewScreen(Screen):
         filechooser = FileChooserListView(
             path=os.path.expanduser('~'),
             filters=['*.xlsx', '*.xls'],
+            font_name='simhei',
             size_hint=(1, 0.9)
         )
         
@@ -1255,6 +1260,7 @@ class DataViewScreen(Screen):
         
         popup = Popup(
             title='选择Excel文件 (Linux)',
+            title_font='simhei',
             content=content,
             size_hint=(0.8, 0.8),
             auto_dismiss=False
@@ -1282,6 +1288,7 @@ class DataViewScreen(Screen):
         chooser = FileChooserListView(
             path=os.path.expanduser('~'),
             filters=['*.xlsx', '*.xls'],
+            font_name='simhei',
             size_hint=(1, 0.85)
         )
         
@@ -1296,6 +1303,7 @@ class DataViewScreen(Screen):
         
         popup = Popup(
             title='选择Excel文件',
+            title_font='simhei',
             content=box,
             size_hint=(0.7, 0.7),
             auto_dismiss=False
@@ -1465,7 +1473,7 @@ class DataViewScreen(Screen):
             del self._import_error
 
     def show_popup(self, title, message):
-        popup = Popup(title=title, size_hint=(0.8, 0.4))
+        popup = Popup(title=title, title_font='simhei', size_hint=(0.8, 0.4))
         content = BoxLayout(orientation='vertical', padding=10)
         content.add_widget(Label(text=message, font_name='simhei'))
         close_btn = Button(text='关闭', size_hint=(1, 0.3), font_name='simhei')
