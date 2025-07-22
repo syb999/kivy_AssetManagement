@@ -325,7 +325,7 @@ class ScannerScreen(Screen):
                     'https://api.ocr.space/parse/image',
                     files={'file': f},
                     data={
-                        'apikey': 'customapi',  #请填入自己申请的免费api
+                        'apikey': 'K87528338888957',  #请填入自己申请的免费api
                         'language': 'eng',
                         'OCREngine': 2,  # 使用引擎2（更准确）
                         'scale': True    # 启用自动缩放

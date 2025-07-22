@@ -17,7 +17,7 @@ source.include_dirs = assets, data
 
 exclude_modules = os,json
 
-version = 1.0
+version = 1.2
 
 requirements = python3,kivy,pyjnius,jnius,plyer,sdl2,sdl2_image,sdl2_ttf,sdl2_mixer,android,pillow,sqlite3,numpy,pandas,openpyxl,et_xmlfile,requests
 
@@ -55,6 +55,13 @@ android.enable_androidx = True
 android.use_androidx = True
 
 android.arch = arm64-v8a
+
+presplash.filename = %(source.dir)s/data/presplash.jpg
+
+android.presplash_delay = 0
+android.presplash_scale_type = centerCrop
+
+icon.filename = %(source.dir)s/icons/icon.png
 
 ios.kivy_ios_url = https://github.com/kivy/kivy-ios
 ios.kivy_ios_branch = master
