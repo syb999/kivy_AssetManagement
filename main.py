@@ -121,7 +121,7 @@ class AssetDatabase:
             if conditions:
                 query += ' WHERE ' + ' AND '.join(conditions)
 
-        query += ' ORDER BY id DESC'
+        query += ' ORDER BY id ASC'
 
         if limit is not None:
             query += ' LIMIT ?'
@@ -899,7 +899,7 @@ class DataViewScreen(Screen):
         super().__init__(**kwargs)
         self.current_filters = {}
         self.selected_asset = None
-	    self._loading = False
+        self._loading = False
         self._current_page = 0
         self._total_pages = 0
         self.BATCH_SIZE = 20
@@ -922,6 +922,7 @@ class DataViewScreen(Screen):
             
             self.ids.loading_label.opacity = 1
             self.ids.loading_label.text = "正在加载数据..."
+            self.ids.loading_label.font_name = "simhei"
             self.ids.data_grid.opacity = 0.5
 
             Clock.schedule_once(lambda dt: self._async_load_data(), 0.1)
@@ -1358,7 +1359,7 @@ class DataViewScreen(Screen):
         
         popup = Popup(
             title='选择Excel文件',
-            font_name='simhei',
+            title_font='simhei',
             content=content,
             size_hint=(0.8, 0.8),
             auto_dismiss=False
