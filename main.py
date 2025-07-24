@@ -108,7 +108,7 @@ class AssetDatabase:
         row = cursor.fetchone()
         return dict(zip(columns, row)) if row else None
     
-    def get_assets(self, filters=None):
+    def get_assets(self, filters=None, limit=None, offset=None):
         query = 'SELECT * FROM assets'
         params = []
         
@@ -120,6 +120,15 @@ class AssetDatabase:
                     params.append(value)
             if conditions:
                 query += ' WHERE ' + ' AND '.join(conditions)
+
+        query += ' ORDER BY id DESC'
+
+        if limit is not None:
+            query += ' LIMIT ?'
+            params.append(limit)
+            if offset is not None:
+                query += ' OFFSET ?'
+                params.append(offset)
         
         cursor = self.conn.cursor()
         cursor.execute(query, params)
@@ -890,24 +899,132 @@ class DataViewScreen(Screen):
         super().__init__(**kwargs)
         self.current_filters = {}
         self.selected_asset = None
-    
+	    self._loading = False
+        self._current_page = 0
+        self._total_pages = 0
+        self.BATCH_SIZE = 20
+
     def on_pre_enter(self):
+        self._current_page = 0
         self.load_data()
     
     def load_data(self, filters=None):
-        app = App.get_running_app()
+        if self._loading:
+            return
+
         try:
-            assets = app.db.get_assets(filters)
-            self.display_data(assets)
+            self._loading = True
+            self.current_filters = filters or {}
+            
+            grid = self.ids.data_grid
+            while len(grid.children) > 7:
+                grid.remove_widget(grid.children[0])
+            
+            self.ids.loading_label.opacity = 1
+            self.ids.loading_label.text = "正在加载数据..."
+            self.ids.data_grid.opacity = 0.5
+
+            Clock.schedule_once(lambda dt: self._async_load_data(), 0.1)
+
         except Exception as e:
-            self.show_error(f"加载数据失败: {str(e)}")
+            self._loading = False
+            self.show_popup("加载错误", f"初始化加载失败:\n{str(e)}")
     
-    def display_data(self, assets):
+    def _async_load_data(self):
+        try:
+            app = App.get_running_app()
+            
+            total_count = self._get_total_count()
+            self._total_pages = max(1, (total_count + self.BATCH_SIZE - 1) // self.BATCH_SIZE)
+            
+            assets = app.db.get_assets(
+                self.current_filters,
+                limit=self.BATCH_SIZE,
+                offset=self._current_page * self.BATCH_SIZE
+            )
+
+            if not assets:
+                self._loading = False
+                self.ids.loading_label.opacity = 0
+                self.ids.data_grid.opacity = 1
+                self.show_popup("提示", "没有找到匹配的数据")
+                return
+
+            self._display_batch(assets)
+
+            self._update_pagination_controls()
+            
+            self._loading = False
+            self.ids.loading_label.opacity = 0
+            self.ids.data_grid.opacity = 1
+
+        except Exception as e:
+            self._loading = False
+            self.ids.loading_label.opacity = 0
+            self.ids.data_grid.opacity = 1
+            self.show_popup("加载错误", f"加载数据失败: {str(e)}")
+
+    def _get_total_count(self):
+        app = App.get_running_app()
+        cursor = app.db.conn.cursor()
+        
+        query = 'SELECT COUNT(*) FROM assets'
+        params = []
+        
+        if self.current_filters:
+            conditions = []
+            for field, value in self.current_filters.items():
+                if value:
+                    conditions.append(f"{field} = ?")
+                    params.append(value)
+            if conditions:
+                query += ' WHERE ' + ' AND '.join(conditions)
+        
+        cursor.execute(query, params)
+        return cursor.fetchone()[0]
+
+    def _update_pagination_controls(self):
+        self.ids.page_info.text = f"第{self._current_page + 1}页/共{self._total_pages}页"
+        self.ids.prev_page.disabled = self._current_page <= 0
+        self.ids.next_page.disabled = self._current_page >= self._total_pages - 1
+
+    def prev_page(self):
+        if self._current_page > 0:
+            self._current_page -= 1
+            self.load_data(self.current_filters)
+
+    def next_page(self):
+        if self._current_page < self._total_pages - 1:
+            self._current_page += 1
+            self.load_data(self.current_filters)
+
+    def _display_next_batch(self):
+        if not self._all_assets:
+            self._loading = False
+            self.ids.loading_label.opacity = 0
+            self.ids.data_grid.opacity = 1
+            return
+            
+        start = self._current_batch * self.BATCH_SIZE
+        end = start + self.BATCH_SIZE
+        batch = self._all_assets[start:end]
+        
+        self._display_batch(batch)
+        
+        loaded_count = min(end, len(self._all_assets))
+        self.ids.loading_label.text = f"加载中... {loaded_count}/{len(self._all_assets)}"
+        
+        if end < len(self._all_assets):
+            self._current_batch += 1
+            Clock.schedule_once(lambda dt: self._display_next_batch(), 0.05)
+        else:
+            self._loading = False
+            self.ids.loading_label.opacity = 0
+            self.ids.data_grid.opacity = 1
+
+    def _display_batch(self, assets):
         grid = self.ids.data_grid
-        
-        while len(grid.children) > 7:
-            grid.remove_widget(grid.children[0])
-        
+
         column_widths = {
             'id': 60,
             'asset_id': 200,
@@ -1065,16 +1182,35 @@ class DataViewScreen(Screen):
         dropdown.open(filter_btn)
     
     def apply_filter(self, column, value):
-        if value == '':
-            self.current_filters.pop(column, None)
-        else:
-            self.current_filters[column] = value
-        
-        self.load_data(self.current_filters)
+        try:
+            valid_columns = ['asset_id', 'asset_name', 'asset_type', 'user', 'location']
+            if column not in valid_columns:
+                raise ValueError(f"无效的列名: {column}")
+            
+            if value == '':
+                if column in self.current_filters:
+                    del self.current_filters[column]
+            else:
+                self.current_filters[column] = value
+
+            self._current_page = 0
+
+            self.load_data(self.current_filters)
+            
+        except Exception as e:
+            self._loading = False
+            self.ids.loading_label.opacity = 0
+            self.show_popup("筛选错误", f"应用筛选时出错:\n{str(e)}")
     
     def clear_filters(self):
-        self.current_filters = {}
-        self.load_data()
+        try:
+            self.current_filters = {}
+            self._current_page = 0
+            self.load_data()
+        except Exception as e:
+            self._loading = False
+            self.ids.loading_label.opacity = 0
+            self.show_popup("错误", f"清除筛选时出错: {str(e)}")
     
     def export_to_excel(self):
         app = App.get_running_app()
@@ -1730,6 +1866,28 @@ KV = '''
                     on_press: root.manager.current = 'main'
 
 <DataViewScreen>:
+    Label:
+        id: loading_label
+        text: ""
+        size_hint_y: None
+        height: 30
+        opacity: 0
+
+    BoxLayout:
+        id: loading_indicator
+        orientation: 'horizontal'
+        size_hint_y: None
+        height: 30
+        opacity: 0
+        spacing: 10
+        
+        Label:
+            text: '加载中'
+            font_name: 'simhei'
+        ProgressBar:
+            max: 100
+            value: 0
+
     BoxLayout:
         orientation: 'vertical'
         spacing: 10
@@ -1794,7 +1952,7 @@ KV = '''
                 size_hint_y: None
                 height: self.minimum_height
                 row_default_height: 40
-                
+
                 Label:
                     text: '序号'
                     size_hint_x: None
@@ -1838,7 +1996,36 @@ KV = '''
                     width: '90'
                     bold: True
                     font_name: 'simhei'
-        
+
+        BoxLayout:
+            id: pagination_controls
+            size_hint_y: None
+            height: '50dp'
+            spacing: '5dp'
+            
+            Button:
+                id: prev_page
+                text: '上一页'
+                font_name: 'simhei'
+                size_hint_x: 0.2
+                disabled: True
+                on_press: root.prev_page()
+            
+            Label:
+                id: page_info
+                text: '第1页'
+                font_name: 'simhei'
+                halign: 'center'
+                size_hint_x: 0.6
+            
+            Button:
+                id: next_page
+                text: '下一页'
+                font_name: 'simhei'
+                size_hint_x: 0.2
+                disabled: True
+                on_press: root.next_page()
+
         BoxLayout:
             size_hint_y: None
             height: '100dp' if app.is_android else '80dp'
