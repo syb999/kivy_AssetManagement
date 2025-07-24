@@ -954,9 +954,9 @@ class DataViewScreen(Screen):
             
             edit_btn = Button(
                 text='编辑',
-                size_hint_x=0.5,
+                size_hint_x=0.6,
                 font_name='simhei',
-                font_size='12sp',
+                font_size='10sp',
                 size_hint_y=None,
                 height=50
             )
@@ -964,9 +964,9 @@ class DataViewScreen(Screen):
             
             delete_btn = Button(
                 text='删除',
-                size_hint_x=0.5,
+                size_hint_x=0.4,
                 font_name='simhei',
-                font_size='12sp',
+                font_size='10sp',
                 background_color=(1, 0, 0, 1),
                 size_hint_y=None,
                 height=50
