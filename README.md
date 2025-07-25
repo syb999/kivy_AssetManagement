@@ -109,4 +109,10 @@ android.presplash_scale_type = centerCrop
 
 android.gradle_options = -Xmx2048m -XX:MaxPermSize=1024m
 
+--------------------------------------------------------------------------
+
+如果遇到buildozer -v android debug编译时报错numpy版本问题时，可以尝试指定numpy版本：
+pip install numpy==1.24.4
+然后重新编译
+
 </div>

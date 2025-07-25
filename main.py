@@ -24,6 +24,10 @@ from openpyxl import Workbook
 from openpyxl.styles import Font, Alignment
 from jnius import autoclass
 import requests
+from threading import Thread
+import threading
+from functools import wraps
+
 from kivy.graphics.texture import Texture
 import numpy as np
 from PIL import Image
@@ -41,7 +45,7 @@ Config.set('kivy', 'keyboard_layout', 'default')
 
 def load_font():
     font_paths = [
-        os.path.join('assets/font', 'simhei.ttf'), 
+        os.path.join('assets/font', 'simhei.ttf'),
         os.path.join(os.path.dirname(__file__), 'font', 'simhei.ttf'),
         '/usr/share/fonts/truetype/simhei.ttf',
         'C:/Windows/Fonts/simhei.ttf'
@@ -65,11 +69,19 @@ load_font()
 
 class AssetDatabase:
     def __init__(self, db_path='assets.db'):
-        self.conn = sqlite3.connect(db_path)
+        self.db_path = db_path
+        self._local = threading.local()
         self._create_tables()
     
+    def _get_connection(self):
+        if not hasattr(self._local, 'conn') or not self._local.conn:
+            self._local.conn = sqlite3.connect(self.db_path)
+            self._local.conn.row_factory = sqlite3.Row
+        return self._local.conn
+    
     def _create_tables(self):
-        cursor = self.conn.cursor()
+        conn = sqlite3.connect(self.db_path)
+        cursor = conn.cursor()
         cursor.execute('''
         CREATE TABLE IF NOT EXISTS assets (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -83,10 +95,25 @@ class AssetDatabase:
         )
         ''')
         cursor.execute('CREATE INDEX IF NOT EXISTS idx_asset_id ON assets(asset_id)')
-        self.conn.commit()
+        conn.commit()
+        conn.close()
     
-    def add_asset(self, asset_data):
-        cursor = self.conn.cursor()
+    def thread_safe(func):
+        @wraps(func)
+        def wrapper(self, *args, **kwargs):
+            conn = self._get_connection()
+            try:
+                result = func(self, conn, *args, **kwargs)
+                conn.commit()
+                return result
+            except Exception as e:
+                conn.rollback()
+                raise e
+        return wrapper
+    
+    @thread_safe
+    def add_asset(self, conn, asset_data):
+        cursor = conn.cursor()
         cursor.execute('''
         INSERT INTO assets (asset_id, asset_name, asset_type, user, location, notes)
         VALUES (?, ?, ?, ?, ?, ?)
@@ -98,17 +125,17 @@ class AssetDatabase:
             asset_data.get('location', ''),
             asset_data.get('notes', '')
         ))
-        self.conn.commit()
         return cursor.lastrowid
     
-    def get_asset_by_id(self, asset_id):
-        cursor = self.conn.cursor()
+    @thread_safe
+    def get_asset_by_id(self, conn, asset_id):
+        cursor = conn.cursor()
         cursor.execute('SELECT * FROM assets WHERE asset_id = ?', (asset_id,))
-        columns = [col[0] for col in cursor.description]
         row = cursor.fetchone()
-        return dict(zip(columns, row)) if row else None
-    
-    def get_assets(self, filters=None, limit=None, offset=None):
+        return dict(row) if row else None
+
+    @thread_safe
+    def get_assets(self, conn, filters=None, limit=None, offset=None):
         query = 'SELECT * FROM assets'
         params = []
         
@@ -120,9 +147,9 @@ class AssetDatabase:
                     params.append(value)
             if conditions:
                 query += ' WHERE ' + ' AND '.join(conditions)
-
+        
         query += ' ORDER BY id ASC'
-
+        
         if limit is not None:
             query += ' LIMIT ?'
             params.append(limit)
@@ -130,19 +157,19 @@ class AssetDatabase:
                 query += ' OFFSET ?'
                 params.append(offset)
         
-        cursor = self.conn.cursor()
+        cursor = conn.cursor()
         cursor.execute(query, params)
-        
-        columns = [col[0] for col in cursor.description]
-        return [dict(zip(columns, row)) for row in cursor.fetchall()]
+        return [dict(row) for row in cursor.fetchall()]
     
-    def get_distinct_values(self, field):
-        cursor = self.conn.cursor()
+    @thread_safe
+    def get_distinct_values(self, conn, field):
+        cursor = conn.cursor()
         cursor.execute(f'SELECT DISTINCT {field} FROM assets WHERE {field} != "" ORDER BY {field}')
         return [row[0] for row in cursor.fetchall()]
     
-    def update_asset(self, asset_id, update_data):
-        cursor = self.conn.cursor()
+    @thread_safe
+    def update_asset(self, conn, asset_id, update_data):
+        cursor = conn.cursor()
         set_clause = ', '.join([f"{k} = ?" for k in update_data.keys()])
         values = list(update_data.values())
         values.append(asset_id)
@@ -152,15 +179,22 @@ class AssetDatabase:
         SET {set_clause}
         WHERE asset_id = ?
         ''', values)
-        self.conn.commit()
-        return cursor.rowcount
-
-    def delete_asset(self, asset_id):
-        cursor = self.conn.cursor()
-        cursor.execute("DELETE FROM assets WHERE asset_id = ?", (asset_id,))
-        self.conn.commit()
         return cursor.rowcount
     
+    @thread_safe
+    def delete_asset(self, conn, asset_id):
+        cursor = conn.cursor()
+        cursor.execute("DELETE FROM assets WHERE asset_id = ?", (asset_id,))
+        return cursor.rowcount
+    
+    def close_all(self):
+        if hasattr(self._local, 'conn'):
+            self._local.conn.close()
+            del self._local.conn
+    
+    def __del__(self):
+        self.close_all()
+
     def export_to_excel(self, file_path):
         assets = self.get_assets()
         
@@ -181,10 +215,10 @@ class AssetDatabase:
             cell = ws.cell(row=1, column=col)
             cell.font = Font(bold=True)
             cell.alignment = Alignment(horizontal='center')
-        
+
         for _, row in df.iterrows():
             ws.append(row.tolist())
-        
+
         column_widths = {
             'A': 6,   # 序号
             'B': 25,  # 资产编号
@@ -200,9 +234,6 @@ class AssetDatabase:
         
         wb.save(file_path)
     
-    def __del__(self):
-        self.conn.close()
-
     def import_from_excel(self, file_path):
         try:
             df = pd.read_excel(file_path, engine='openpyxl')
@@ -259,38 +290,47 @@ class ScannerScreen(Screen):
         self.capture_count = 0
         Clock.schedule_once(self.delayed_init, 1)
 
-    def show_message(self, title="Tips", message="", is_error=False):
-        if not message:
-            return
-            
-        popup = Popup(
-            title=title,
-            title_font='simhei',
-            size_hint=(0.8, 0.4),
-            title_color=(1, 0, 0, 1) if is_error else (0, 0.5, 0, 1),
-            separator_color=(0.8, 0, 0, 1) if is_error else (0, 0.5, 0, 1)
-        )
+    def show_message(self, title="提示", message="", is_error=False):
+        def show(dt):
+            try:
+                popup = Popup(
+                    title=title,
+                    title_font='simhei',
+                    size_hint=(0.8, 0.4),
+                    title_color=(1, 0, 0, 1) if is_error else (0, 0.5, 0, 1)
+                )
+                content = BoxLayout(orientation='vertical', padding=10)
+                content.add_widget(Label(text=message, font_name='simhei'))
+                btn = Button(text='关闭', size_hint=(1, 0.3), font_name='simhei')
+                btn.bind(on_press=popup.dismiss)
+                content.add_widget(btn)
+                popup.content = content
+                popup.open()
+            except Exception as e:
+                print(f"显示消息失败: {str(e)}")
         
-        content = BoxLayout(orientation='vertical', padding=10, spacing=10)
-        content.add_widget(Label(
-            text=message,
-            font_name='simhei',
-            halign='center',
-            valign='middle',
-            size_hint_y=0.7
-        ))
+        Clock.schedule_once(show)
+
+    def show_error(self, message):
+        def show(dt):
+            try:
+                popup = Popup(
+                    title='错误',
+                    title_font='simhei',
+                    size_hint=(0.8, 0.4),
+                    title_color=(1, 0, 0, 1)
+                )
+                content = BoxLayout(orientation='vertical', padding=10)
+                content.add_widget(Label(text=message, font_name='simhei'))
+                btn = Button(text='关闭', size_hint=(1, 0.3), font_name='simhei')
+                btn.bind(on_press=popup.dismiss)
+                content.add_widget(btn)
+                popup.content = content
+                popup.open()
+            except Exception as e:
+                print(f"显示错误失败: {str(e)}")
         
-        close_btn = Button(
-            text='关闭',
-            size_hint=(1, 0.3),
-            font_name='simhei',
-            background_color=(0.8, 0, 0, 1) if is_error else (0, 0.5, 0, 1)
-        )
-        close_btn.bind(on_press=popup.dismiss)
-        content.add_widget(close_btn)
-        
-        popup.content = content
-        popup.open()
+        Clock.schedule_once(show)
 
     def delayed_init(self, dt):
         if platform == 'android':
@@ -314,7 +354,7 @@ class ScannerScreen(Screen):
             Permission.WRITE_EXTERNAL_STORAGE,
             Permission.READ_EXTERNAL_STORAGE
         ]
-        
+
         if all(check_permission(p) for p in required_permissions):
             self.permissions_granted = True
             Clock.schedule_once(self.init_components, 0.5)
@@ -371,7 +411,7 @@ class ScannerScreen(Screen):
         if match:
             return match.group(1)
         
-        return text.strip()
+        return text.strip().upper()
 
     def _enhance_image(self, img):
         from PIL import ImageEnhance, ImageFilter, ImageOps
@@ -400,7 +440,7 @@ class ScannerScreen(Screen):
         def clahe_pillow(image, clip_limit=2.0, grid_size=8):
             width, height = image.size
             grid_w, grid_h = width // grid_size, height // grid_size
-            
+
             for i in range(grid_size):
                 for j in range(grid_size):
                     box = (
@@ -415,7 +455,7 @@ class ScannerScreen(Screen):
                     cdf = [sum(hist[:i+1]) for i in range(256)]
                     cdf_min = min(cdf)
                     cdf_max = max(cdf)
-                    
+
                     if clip_limit > 0:
                         excess = sum(max(count - clip_limit, 0) for count in hist)
                         bin_incr = excess // 256
@@ -454,7 +494,7 @@ class ScannerScreen(Screen):
             (img.width * 2, img.height * 2),
             resample=Image.LANCZOS
         )
-        
+
         img = img.filter(ImageFilter.UnsharpMask(
             radius=2,
             percent=150,
@@ -534,7 +574,7 @@ class ScannerScreen(Screen):
         img = img.convert('L')
         
         img = ImageOps.autocontrast(img, cutoff=3)
-        
+
         def adaptive_binarize(pixel):
             return 0 if pixel < 180 else 255
         img = img.point(adaptive_binarize)
@@ -542,7 +582,7 @@ class ScannerScreen(Screen):
         img = img.filter(ImageFilter.MedianFilter(size=3))
         
         img = img.filter(ImageFilter.SHARPEN)
-        
+
         img = img.resize((img.width*2, img.height*2), Image.LANCZOS)
         
         return img
@@ -578,18 +618,17 @@ class ScannerScreen(Screen):
             
             asset_id = self.ocr_space(temp_path)
             
-            #if self.save_to_gallery(img):
-                #self.capture_count += 1
-                #self.ids.status_label.text = f"扫描次数: {self.capture_count}"
-            
             if asset_id:
-                print(f"识别结果: {asset_id}")
-                self.handle_scan_result(asset_id)
+                print(f"识别成功: {asset_id}")
+                Clock.schedule_once(lambda dt: self.handle_scan_result(asset_id))
                 self.stop_scanning()
                 
         except Exception as e:
-            print(f"扫描出错: {e}")
-            self.show_message("错误", f"扫描出错: {str(e)}", is_error=True)
+            error_msg = str(e)
+            def show_err(dt):
+                self.show_error(f"扫描出错: {error_msg}")
+                self.stop_scanning()
+            Clock.schedule_once(show_err)
 
     def get_app_storage_path(self):
         if platform == 'android':
@@ -779,15 +818,45 @@ class ScannerScreen(Screen):
 
     def handle_scan_result(self, text):
         app = App.get_running_app()
-        asset = app.db.get_asset_by_id(text)
-        
-        if asset:
-            input_screen = app.root.get_screen('input')
-            input_screen.load_asset(asset)
-            app.root.current = 'input'
-            self.show_message(f"找到资产: {asset['asset_name']}")
-        else:
-            self.show_message("提示", f"未找到资产编号: {text}")
+ 
+        def query_in_thread(text=text):
+            try:
+                db = AssetDatabase()
+                assets = db.get_assets({'asset_id': text}, limit=1)
+                
+                def update_ui(assets, dt):
+                    try:
+                        if assets and len(assets) > 0:
+                            asset = assets[0]
+                            input_screen = app.root.get_screen('input')
+                            input_screen.load_asset(asset)
+                            app.root.current = 'input'
+                            self.show_message(f"找到资产: {asset.get('asset_name', '未知')}")
+                        else:
+                            self.show_message("提示", f"未找到资产编号: {text}")
+                    except Exception as e:
+                        self.show_error(f"UI更新错误: {str(e)}")
+                
+                Clock.schedule_once(lambda dt: update_ui(assets, dt))
+                
+            except Exception as e:
+                error_msg = str(e)
+                Clock.schedule_once(lambda dt: self.show_error(f"查询错误: {error_msg}"))
+
+        Thread(target=query_in_thread, daemon=True).start()
+
+    def _safe_update_ui(self, asset, text):
+        try:
+            app = App.get_running_app()
+            if asset:
+                input_screen = app.root.get_screen('input')
+                input_screen.load_asset(asset)
+                app.root.current = 'input'
+                self.show_message(f"找到资产: {asset.get('asset_name', '未知')}")
+            else:
+                self.show_message("提示", f"未找到资产编号: {text}")
+        except Exception as e:
+            self.show_error(f"更新UI时出错: {str(e)}")
 
 class MainScreen(Screen):
     pass
@@ -798,14 +867,20 @@ class DataInputScreen(Screen):
         self.current_asset = None
 
     def load_asset(self, asset_data):
-        self.current_asset = asset_data
-        self.ids.asset_id.text = asset_data.get('asset_id', '')
-        self.ids.asset_name.text = asset_data.get('asset_name', '')
-        self.ids.asset_type.text = asset_data.get('asset_type', '')
-        self.ids.user.text = asset_data.get('user', '')
-        self.ids.location.text = asset_data.get('location', '')
-        self.ids.notes.text = asset_data.get('notes', '')
-        self.ids.save_btn.text = '更新'
+        def do_load(dt):
+            try:
+                self.current_asset = asset_data
+                self.ids.asset_id.text = asset_data.get('asset_id', '')
+                self.ids.asset_name.text = asset_data.get('asset_name', '')
+                self.ids.asset_type.text = asset_data.get('asset_type', '')
+                self.ids.user.text = asset_data.get('user', '')
+                self.ids.location.text = asset_data.get('location', '')
+                self.ids.notes.text = asset_data.get('notes', '')
+                self.ids.save_btn.text = '更新'
+            except Exception as e:
+                print(f"加载资产失败: {str(e)}")
+        
+        Clock.schedule_once(do_load)
 
     def update_data(self):
         if not self.current_asset:
@@ -907,7 +982,7 @@ class DataViewScreen(Screen):
     def on_pre_enter(self):
         self._current_page = 0
         self.load_data()
-    
+
     def load_data(self, filters=None):
         if self._loading:
             return
@@ -924,65 +999,69 @@ class DataViewScreen(Screen):
             self.ids.loading_label.text = "正在加载数据..."
             self.ids.loading_label.font_name = "simhei"
             self.ids.data_grid.opacity = 0.5
+            
+            def async_load(dt):
+                try:
+                    app = App.get_running_app()
+                    
+                    total_count = self._get_total_count(filters)
+                    self._total_pages = max(1, (total_count + self.BATCH_SIZE - 1) // self.BATCH_SIZE)
+                    
+                    assets = app.db.get_assets(
+                        filters,
+                        limit=self.BATCH_SIZE,
+                        offset=self._current_page * self.BATCH_SIZE
+                    )
 
-            Clock.schedule_once(lambda dt: self._async_load_data(), 0.1)
-
+                    def update_ui(dt):
+                        try:
+                            if assets:
+                                self._display_batch(assets)
+                                self._update_pagination_controls()
+                            else:
+                                self.show_popup("提示", "没有找到匹配的数据")
+                        except Exception as e:
+                            self.show_popup("错误", f"更新UI失败: {str(e)}")
+                        finally:
+                            self._loading = False
+                            self.ids.loading_label.opacity = 0
+                            self.ids.data_grid.opacity = 1
+                    
+                    Clock.schedule_once(update_ui)
+                    
+                except Exception as e:
+                    self._loading = False
+                    self.ids.loading_label.opacity = 0
+                    self.ids.data_grid.opacity = 1
+                    self.show_popup("加载错误", f"加载数据失败: {str(e)}")
+            
+            Clock.schedule_once(async_load)
+            
         except Exception as e:
             self._loading = False
             self.show_popup("加载错误", f"初始化加载失败:\n{str(e)}")
-    
-    def _async_load_data(self):
-        try:
-            app = App.get_running_app()
-            
-            total_count = self._get_total_count()
-            self._total_pages = max(1, (total_count + self.BATCH_SIZE - 1) // self.BATCH_SIZE)
-            
-            assets = app.db.get_assets(
-                self.current_filters,
-                limit=self.BATCH_SIZE,
-                offset=self._current_page * self.BATCH_SIZE
-            )
 
-            if not assets:
-                self._loading = False
-                self.ids.loading_label.opacity = 0
-                self.ids.data_grid.opacity = 1
-                self.show_popup("提示", "没有找到匹配的数据")
-                return
-
-            self._display_batch(assets)
-
-            self._update_pagination_controls()
-            
-            self._loading = False
-            self.ids.loading_label.opacity = 0
-            self.ids.data_grid.opacity = 1
-
-        except Exception as e:
-            self._loading = False
-            self.ids.loading_label.opacity = 0
-            self.ids.data_grid.opacity = 1
-            self.show_popup("加载错误", f"加载数据失败: {str(e)}")
-
-    def _get_total_count(self):
+    def _get_total_count(self, filters):
         app = App.get_running_app()
-        cursor = app.db.conn.cursor()
-        
-        query = 'SELECT COUNT(*) FROM assets'
-        params = []
-        
-        if self.current_filters:
-            conditions = []
-            for field, value in self.current_filters.items():
-                if value:
-                    conditions.append(f"{field} = ?")
-                    params.append(value)
-            if conditions:
-                query += ' WHERE ' + ' AND '.join(conditions)
-        
-        cursor.execute(query, params)
-        return cursor.fetchone()[0]
+        try:
+            query = 'SELECT COUNT(*) FROM assets'
+            params = []
+            
+            if filters:
+                conditions = []
+                for field, value in filters.items():
+                    if value:
+                        conditions.append(f"{field} = ?")
+                        params.append(value)
+                if conditions:
+                    query += ' WHERE ' + ' AND '.join(conditions)
+            
+            cursor = app.db._get_connection().cursor()
+            cursor.execute(query, params)
+            return cursor.fetchone()[0]
+        except Exception as e:
+            print(f"获取总数失败: {str(e)}")
+            return 0
 
     def _update_pagination_controls(self):
         self.ids.page_info.text = f"第{self._current_page + 1}页/共{self._total_pages}页"
@@ -1014,6 +1093,7 @@ class DataViewScreen(Screen):
         
         loaded_count = min(end, len(self._all_assets))
         self.ids.loading_label.text = f"加载中... {loaded_count}/{len(self._all_assets)}"
+        self.ids.loading_label.font_name = "simhei"
         
         if end < len(self._all_assets):
             self._current_batch += 1
@@ -1192,7 +1272,7 @@ class DataViewScreen(Screen):
                 if column in self.current_filters:
                     del self.current_filters[column]
             else:
-                self.current_filters[column] = value
+                self.current_filters[column] = value.upper() if column == 'asset_id' else value
 
             self._current_page = 0
 
@@ -1202,7 +1282,7 @@ class DataViewScreen(Screen):
             self._loading = False
             self.ids.loading_label.opacity = 0
             self.show_popup("筛选错误", f"应用筛选时出错:\n{str(e)}")
-    
+
     def clear_filters(self):
         try:
             self.current_filters = {}
@@ -1212,7 +1292,7 @@ class DataViewScreen(Screen):
             self._loading = False
             self.ids.loading_label.opacity = 0
             self.show_popup("错误", f"清除筛选时出错: {str(e)}")
-    
+
     def export_to_excel(self):
         app = App.get_running_app()
         try:
@@ -1276,7 +1356,7 @@ class DataViewScreen(Screen):
                 
                 uri = intent.getData()
                 content_uri = cast('android.net.Uri', uri)
-                
+
                 cr = PythonActivity.mActivity.getContentResolver()
                 fd = cr.openFileDescriptor(content_uri, "r")
                 
@@ -1305,7 +1385,7 @@ class DataViewScreen(Screen):
         temp_dir = os.path.join(app_storage_path(), 'temp_import')
         os.makedirs(temp_dir, exist_ok=True)
         temp_path = os.path.join(temp_dir, 'import_temp.xlsx')
-        
+
         cr = PythonActivity.mActivity.getContentResolver()
         input_stream = cr.openInputStream(content_uri)
         
@@ -1390,7 +1470,7 @@ class DataViewScreen(Screen):
             font_name='simhei',
             size_hint=(1, 0.9)
         )
-        
+
         btn_box = BoxLayout(size_hint_y=None, height=50, spacing=5)
         btn_import = Button(text='导入', size_hint_x=0.6, font_name='simhei')
         btn_cancel = Button(text='取消', size_hint_x=0.4, font_name='simhei')
