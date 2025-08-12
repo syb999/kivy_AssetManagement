@@ -1249,18 +1249,45 @@ class DataViewScreen(Screen):
         values = app.db.get_distinct_values(column)
         
         dropdown = DropDown()
+        dropdown.bind(on_open=self.adjust_dropdown_width)
         
         select_all = Button(text='全选', size_hint_y=None, height=40, font_name='simhei')
         select_all.bind(on_release=lambda x: self.apply_filter(column, ''))
         dropdown.add_widget(select_all)
         
         for value in values:
-            btn = Button(text=value, size_hint_y=None, height=40, font_name='simhei')
-            btn.bind(on_release=lambda btn, c=column: self.apply_filter(c, btn.text))
+            btn = Button(
+                text=value,
+                size_hint_y=None,
+                height=100,
+                font_name='simhei',
+                halign='left',
+                valign='middle',
+                text_size=(None, None),
+                padding=(10, 0)
+            )
+            btn.bind(
+                texture_size=lambda btn, *args: setattr(btn, 'text_size', (btn.width - 10, None)),
+                on_release=lambda btn, c=column: self.apply_filter(c, btn.text)
+            )
             dropdown.add_widget(btn)
         
         filter_btn = getattr(self.ids, f'filter_{column}')
         dropdown.open(filter_btn)
+
+    def adjust_dropdown_width(self, dropdown):
+        max_width = 0
+        for child in dropdown.children:
+            child.width = dropdown.width
+            child.texture_update()
+            max_width = max(max_width, child.texture_size[0] + 40)
+        
+        min_width = 200
+        max_width = max(min_width, min(max_width, Window.width * 0.8))
+        dropdown.width = max_width
+
+        for child in dropdown.children:
+            child.text_size = (max_width - 20, None)
     
     def apply_filter(self, column, value):
         try:
